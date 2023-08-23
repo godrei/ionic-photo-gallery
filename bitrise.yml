@@ -1,0 +1,289 @@
+---
+format_version: 11
+default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
+project_type: other
+trigger_map:
+- push_branch: "*"
+  workflow: brew
+- pull_request_source_branch: "*"
+  workflow: brew
+- tag: "*.*.*"
+  workflow: brew
+workflows:
+  brew:
+    title: Super Brew workflow
+    summary: this `is` markdown
+    description: this `is` markdown
+    steps:
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -x
+
+            arch "-arm64" brew install python-certifi
+
+            set -e
+
+            arch "-arm64" brew link --overwrite python-certifi
+        run_if: 'true'
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -ex
+
+            arch "-arm64" "brew" "reinstall" "ansible" > /dev/null
+        run_if: 'false'
+    - brew-install@0:
+        inputs:
+        - packages: ansible
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -ex
+
+            uname -s
+            uname -m
+            sysctl sysctl.proc_translated || true
+
+            brew config || true
+            brew doctor || true
+        title: System info
+        run_if: 'false'
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -ex
+
+            bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/uninstall.sh)"
+        run_if: 'false'
+        title: Uninstall brew
+    - script@1:
+        title: Brew install for rosetta
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -ex
+
+            arch -x86_64 brew install jq
+        run_if: 'false'
+    - brew-install@0:
+        inputs:
+        - packages: jq
+        is_always_run: true
+        run_if: 'false'
+  curl_appstoreconnent:
+    steps:
+    - script@1.1.5:
+        inputs:
+        - content: |-
+            set -e
+            set -x
+
+            DEV_DATA_PATH=apple_developer_portal_data.json
+            curl -s -X GET -H "BUILD_API_TOKEN: $BITRISE_BUILD_API_TOKEN" $BITRISE_BUILD_URL/apple_developer_portal_data.json > $DEV_DATA_PATH
+            cp $DEV_DATA_PATH $BITRISE_DEPLOY_DIR
+    - deploy-to-bitrise-io@1: {}
+  fvm:
+    steps:
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -e
+            # make pipelines' return status equal the last command to exit with a non-zero status, or zero if all commands exit successfully
+            set -o pipefail
+            # debug log
+            set -x
+
+            dart --version
+            flutter --version
+  getenv:
+    steps:
+    - git-clone@8:
+        inputs:
+        - repository_url: https://github.com/bitrise-io/android-demo-app.git
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -ex
+
+            MESSAGE=test ./gradlew -q hello
+    meta:
+      bitrise.io:
+        stack: osx-xcode-14.3.x-ventura
+        machine_type_id: g2-m1.8core
+  install-missing-android-tool-error:
+    steps:
+    - git::https://github.com/MarathonLabs/bitrise-step-run-tests-using-marathon-cloud.git@0.1.0:
+        inputs:
+        - application: app.apk
+        - test_application: test_app.apk
+        - api_key: key
+    - git::https://github.com/bitrise-steplib/bitrise-step-simple-git-clone.git@master:
+        inputs:
+        - repository_url: https://github.com/bitrise-io/Bitrise-Android-Sample.git
+        - clone_into_dir: "."
+        - branch: error-test
+    - install-missing-android-tools@3:
+        inputs:
+        - gradlew_path: "./gradlew"
+    - git::https://github.com/bitrise-steplib/steps-install-missing-android-tools.git@gradle-errors-3:
+        is_always_run: true
+        inputs:
+        - gradlew_path: "./gradlew"
+  npx:
+    envs:
+    - EXPO_ACCESS_TOKEN: idE9RR70BFI3flLKVcaE3PAqAoJEOHb98Csq-Zw7
+    - SAMPLE_APP_URL: https://github.com/bitrise-io/expo-sample-managed.git
+    - SAMPLE_APP_BRANCH: update-sample
+    steps:
+    - git::https://github.com/moatazeldebsy/bitrise-step-saucelabs-app-automate: {}
+    - fastlane@3.3: {}
+    - script:
+        inputs:
+        - content: |-
+            #!/bin/env bash
+            set -x
+
+            whoami
+            ls -la
+
+            npx create-expo-app AwesomeProject
+            ls -la "$(npm config get cache)/_npx/a712338f43e79bae/node_modules"
+
+            npm install create-expo-app
+            ./node_modules/.bin/create-expo-app AwesomeProject
+            ls -la ./node_modules/.bin/create-expo-app
+    - script@1:
+        run_if: false
+        inputs:
+        - content: "#!/bin/bash\nset -ex\n\nTHIS_SCRIPT_DIR=\"$( cd \"$( dirname \"${BASH_SOURCE[0]}\"
+            )\" && pwd )\"\n\n# start repeato batch run tests & upload report\nrm
+            -rf batch-report\nnpm install @repeato/cli-testrunner -g \nnpm_config_yes=true
+            cli-testrunner --licenseKey \"${license_key}\" --workspaceDir \"${workspace_path}\"
+            --batchId \"${batch_id}\" --outputDir \"./batch-report\" --logLevel DEBUG\nzip
+            -r batch_report_$batch_id.zip batch-report\ncp batch_report_$batch_id.zip
+            $BITRISE_DEPLOY_DIR/batch_report_$batch_id.zip\ncp jUnitReport.xml $BITRISE_DEPLOY_DIR/UnitTest.xml\n\n#
+            --- Export Environment Variables for other Steps:\nenvman add --key REPEATO_REPORT
+            --value \"$BITRISE_DEPLOY_DIR/batch_report_$batch_id.zip\"\nenvman add
+            --key REPEATO_JUNIT_REPORT --value \"$BITRISE_DEPLOY_DIR/UnitTest.xml\"\n\n#
+            Envman can handle piped inputs, which is useful if the text you want to\n#
+            share is complex and you don't want to deal with proper bash escaping:\n#
+            \ cat file_with_complex_input | envman add --KEY REPEATO_REPORT\n# You
+            can find more usage examples on envman's GitHub page\n#  at: https://github.com/bitrise-io/envman\n\n#\n#
+            --- Exit codes:\n# The exit code of your Step is very important. If you
+            return\n#  with a 0 exit code `bitrise` will register your Step as \"successful\".\n#
+            Any non zero exit code will be registered as \"failed\" by `bitrise`."
+    meta:
+      bitrise.io:
+        stack: linux-docker-android-20.04
+  pod:
+    steps:
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -ex
+
+            stat -f %A ~/.netrc
+  sandbox:
+    steps:
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -ex
+
+            env
+    - certificate-and-profile-installer@1:
+        inputs:
+        - provisioning_profile_url: ''
+        - certificate_url: ''
+    meta:
+      bitrise.io:
+        stack: osx-xcode-14.1.x-ventura
+  test_results:
+    steps:
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            set -ex
+
+            echo "$BITRISE_TEST_RESULT_DIR"
+
+            # Creating a sub-directory for the test run within the BITRISE_TEST_RESULT_DIR:
+
+            test_run_dir="$BITRISE_TEST_RESULT_DIR/test_run_1"
+            mkdir "$test_run_dir"
+
+            # Exporting the JUnit XML test report:
+
+            curl $BITRISEIO_TEST_RESULT_URL --output "$test_run_dir/test_run_result.xcresult.zip"
+            unzip "$test_run_dir/test_run_result.xcresult.zip" -d "$test_run_dir"
+
+            curl $BITRISEIO_IMAGE_URL --output "$test_run_dir/test_run_custom_image.png"
+
+            # Creating the test-info.json file with the name of the test run defined:
+
+            echo '{"test-name":"TEST RUN 1"}' >> "$test_run_dir/test-info.json"
+
+            # Creating a sub-directory for the test run within the BITRISE_TEST_RESULT_DIR:
+
+            test_run_dir="$BITRISE_TEST_RESULT_DIR/test_run_2"
+            mkdir "$test_run_dir"
+
+            # Exporting the JUnit XML test report:
+
+            curl $BITRISEIO_TEST_RESULT_URL --output "$test_run_dir/test_run_result.xcresult.zip"
+            unzip "$test_run_dir/test_run_result.xcresult.zip" -d "$test_run_dir"
+
+            # Creating the test-info.json file with the name of the test run defined:
+
+            echo '{"test-name":"TEST RUN 2"}' >> "$test_run_dir/test-info.json"
+
+            tree -L 3 "$BITRISE_TEST_RESULT_DIR"
+    - script@1:
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -ex
+
+            echo "$BITRISE_TEST_RESULT_DIR"
+
+            # Creating a sub-directory for the test run within the BITRISE_TEST_RESULT_DIR:
+
+            test_run_dir="$BITRISE_TEST_RESULT_DIR/test_run_3"
+            mkdir "$test_run_dir"
+
+            # Exporting the JUnit XML test report:
+
+            curl $BITRISEIO_TEST_RESULT_URL --output "$test_run_dir/test_run_result.xcresult.zip"
+            unzip "$test_run_dir/test_run_result.xcresult.zip" -d "$test_run_dir"
+
+            curl $BITRISEIO_IMAGE_URL --output "$test_run_dir/test_run_custom_image.png"
+            curl $BITRISEIO_IMAGE_URL --output "$test_run_dir/test_run_custom_image_2.png"
+
+            # Creating the test-info.json file with the name of the test run defined:
+
+            echo '{"test-name":"TEST RUN 3"}' >> "$test_run_dir/test-info.json"
+    - deploy-to-bitrise-io@2: {}
+meta:
+  bitrise.io:
+    stack: osx-xcode-14.2.x-ventura-rosetta
+    machine_type_id: g2-m1.8core
